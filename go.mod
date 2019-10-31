@@ -1,4 +1,4 @@
-module sysdig-monitor
+module github.com/YLonely/sysdig-monitor
 
 go 1.12
 
