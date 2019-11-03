@@ -6,10 +6,19 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+
+	"github.com/YLonely/sysdig-monitor/log"
 )
 
 const binaryName = "sysdig"
 const bufferSize = 1024
+const formatString = "\"%evt.num %evt.outputtime %evt.cpu %thread.tid %thread.vtid %proc.name %evt.dir %evt.type %evt.info " +
+	//container parts
+	"%container.name %container.id " +
+	//file or network parts
+	"%fd.name %fd.type %evt.is_io_write %evt.is_io_read %evt.buffer %evt.buflen " +
+	//performance
+	"%evt.latency\""
 
 // Server starts sysdig and dispatch events
 type Server interface {
@@ -35,11 +44,11 @@ func (ls *localServer) Subscribe() chan Event {
 }
 
 func (ls *localServer) Start(ctx context.Context) error {
-	if err := ls.preRrequestCheck(); err != nil {
+	if err := ls.preRrequestCheck(ctx); err != nil {
+		log.L.WithError(err).Error("sysdig server pre check failed.")
 		return err
 	}
-	args := []string{"-pc", "-j", "container.id!=host"}
-	cmd := exec.CommandContext(ctx, binaryName, args...)
+	cmd := exec.CommandContext(ctx, binaryName, "-p", formatString, "-j")
 	rd, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -78,9 +87,9 @@ func (ls *localServer) Start(ctx context.Context) error {
 	return nil
 }
 
-func (ls *localServer) preRrequestCheck() error {
+func (ls *localServer) preRrequestCheck(ctx context.Context) error {
 	//try run sysdig
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(ctx, binaryName)
 	var (
 		ec  chan Exit
@@ -91,9 +100,7 @@ func (ls *localServer) preRrequestCheck() error {
 		cancel()
 		return errors.New("can not start sysdig")
 	}
-
 	cancel()
-
 	Monitor.Wait(cmd, ec)
 
 	return nil
