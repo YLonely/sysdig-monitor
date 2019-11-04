@@ -3,7 +3,6 @@ package sysdig
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"os/exec"
 
@@ -13,6 +12,8 @@ import (
 const binaryName = "sysdig"
 const bufferSize = 1024
 const formatString = "\"%evt.num %evt.outputtime %evt.cpu %thread.tid %thread.vtid %proc.name %evt.dir %evt.type %evt.info " +
+	//syscall
+	"%syscall.type " +
 	//container parts
 	"%container.name %container.id " +
 	//file or network parts
@@ -23,7 +24,7 @@ const formatString = "\"%evt.num %evt.outputtime %evt.cpu %thread.tid %thread.vt
 // Server starts sysdig and dispatch events
 type Server interface {
 	Subscribe() chan Event
-	Start(ctx context.Context) error
+	Start(ctx context.Context) (error, chan error)
 }
 
 var _ Server = &localServer{}
@@ -43,38 +44,40 @@ func (ls *localServer) Subscribe() chan Event {
 	return c
 }
 
-func (ls *localServer) Start(ctx context.Context) error {
+func (ls *localServer) Start(ctx context.Context) (error, chan error) {
 	if err := ls.preRrequestCheck(ctx); err != nil {
 		log.L.WithError(err).Error("sysdig server pre check failed.")
-		return err
+		return err, nil
 	}
 	cmd := exec.CommandContext(ctx, binaryName, "-p", formatString, "-j")
 	rd, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return err, nil
 	}
 	ec, err := Monitor.Start(cmd)
 	if err != nil {
 		rd.Close()
-		return err
+		return err, nil
 	}
 
 	var (
-		dec = json.NewDecoder(rd)
+		dec   = json.NewDecoder(rd)
+		errCh = make(chan error, 1)
 	)
 
 	go func() {
 		defer func() {
+			close(errCh)
 			rd.Close()
 			Monitor.Wait(cmd, ec)
 		}()
 		for {
 			var e Event
 			if err := dec.Decode(&e); err != nil {
-				if err == io.EOF {
-					return
+				if err != io.EOF {
+					errCh <- err
 				}
-				e = Event{Type: "error"}
+				return
 			}
 			for _, subscriber := range ls.subscribers {
 				if !subscriber.closed {
@@ -84,7 +87,7 @@ func (ls *localServer) Start(ctx context.Context) error {
 		}
 	}()
 
-	return nil
+	return nil, errCh
 }
 
 func (ls *localServer) preRrequestCheck(ctx context.Context) error {
@@ -98,7 +101,7 @@ func (ls *localServer) preRrequestCheck(ctx context.Context) error {
 
 	if ec, err = Monitor.Start(cmd); err != nil {
 		cancel()
-		return errors.New("can not start sysdig")
+		return err
 	}
 	cancel()
 	Monitor.Wait(cmd, ec)

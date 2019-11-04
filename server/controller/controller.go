@@ -5,5 +5,6 @@ import (
 )
 
 type Controller interface {
+	// BindedRoutes return all the routes binded to the controller
 	BindedRoutes() []router.Route
 }
