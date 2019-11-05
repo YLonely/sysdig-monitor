@@ -10,8 +10,8 @@ import (
 )
 
 const binaryName = "sysdig"
-const bufferSize = 1024
-const formatString = "\"%evt.num %evt.outputtime %evt.cpu %thread.tid %thread.vtid %proc.name %evt.dir %evt.type %evt.info " +
+const bufferSize = 10240
+const formatString = "*%evt.num %evt.outputtime %evt.cpu %thread.tid %thread.vtid %proc.name %evt.dir %evt.type %evt.info " +
 	//syscall
 	"%syscall.type " +
 	//container parts
@@ -19,7 +19,7 @@ const formatString = "\"%evt.num %evt.outputtime %evt.cpu %thread.tid %thread.vt
 	//file or network parts
 	"%fd.name %fd.type %evt.is_io_write %evt.is_io_read %evt.buffer %evt.buflen " +
 	//performance
-	"%evt.latency\""
+	"%evt.latency"
 
 // Server starts sysdig and dispatch events
 type Server interface {
@@ -49,7 +49,7 @@ func (ls *localServer) Start(ctx context.Context) (error, chan error) {
 		log.L.WithError(err).Error("sysdig server pre check failed.")
 		return err, nil
 	}
-	cmd := exec.CommandContext(ctx, binaryName, "-p", formatString, "-j")
+	cmd := exec.CommandContext(ctx, binaryName, "-p", formatString, "-j", "container.name!=host")
 	rd, err := cmd.StdoutPipe()
 	if err != nil {
 		return err, nil

@@ -18,7 +18,7 @@ type ContainerController struct {
 	ec chan sysdig.Event
 
 	// containers use container id as key
-	containers map[string]*model.Container
+	containers map[string]*mutexContainer
 	// container process channels
 	containerCh map[string]chan containerEvent
 
@@ -26,11 +26,23 @@ type ContainerController struct {
 	cm sync.RWMutex
 }
 
-const eventBufferLen = 512
+type mutexContainer struct {
+	m sync.RWMutex
+	*model.Container
+}
+
+func newMutexContainer(id, name string) *mutexContainer {
+	c := model.NewContainer(id, name)
+	return &mutexContainer{Container: c}
+}
+
+const eventBufferLen = 1024
+const unknownContainerName = "<unknown>"
+const incompleteContainerName = "incomplete"
 
 func NewController(ctx context.Context, ec chan sysdig.Event) (controller.Controller, error) {
 	r := router.NewGroupRouter("/container")
-	res := &ContainerController{containerRouter: r, ec: ec, containers: map[string]*model.Container{}, containerCh: map[string]chan containerEvent{}}
+	res := &ContainerController{containerRouter: r, ec: ec, containers: map[string]*mutexContainer{}, containerCh: map[string]chan containerEvent{}}
 	res.initRouter()
 	if err := res.start(ctx); err != nil {
 		return res, err
@@ -46,10 +58,12 @@ func (cc *ContainerController) BindedRoutes() []router.Route {
 
 func (cc *ContainerController) initRouter() {
 	// TODO
+	cc.containerRouter.AddRoute("/", router.MethodGet, cc.getAllContainers)
+	cc.containerRouter.AddRoute("/:id", router.MethodGet, cc.getContainer)
 }
 
 func (cc *ContainerController) start(ctx context.Context) error {
-	func() {
+	go func() {
 		var e sysdig.Event
 		for {
 			select {
@@ -57,13 +71,18 @@ func (cc *ContainerController) start(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			}
-			if e.ContainerName == "host" {
+			if e.ContainerID == "host" || len(e.ContainerID) == 0 {
 				continue
 			}
 			ce := convert(e)
 			containerID := ce.containerID
+			containerName := ce.containerName
+			if containerName == incompleteContainerName {
+				containerName = unknownContainerName
+			}
+			log.L.Debug(ce)
 			if _, exists := cc.containers[containerID]; !exists {
-				container := model.NewContainer(ce.containerID, ce.containerName)
+				container := newMutexContainer(ce.containerID, containerName)
 				ch := make(chan containerEvent, eventBufferLen)
 				cc.cm.Lock()
 				cc.containers[containerID] = container
@@ -77,9 +96,9 @@ func (cc *ContainerController) start(ctx context.Context) error {
 						log.L.WithError(err).Error("")
 					}
 					cc.cm.Lock()
-					cc.containers[container.ID] = nil
+					delete(cc.containers, container.ID)
 					cc.cm.Unlock()
-					cc.containerCh[container.ID] = nil
+					delete(cc.containerCh, container.ID)
 					close(ch)
 				}()
 			}

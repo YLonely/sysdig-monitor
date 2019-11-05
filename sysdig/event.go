@@ -20,7 +20,7 @@ type Event struct {
 	EventBuflen     int           `json:"evt.buflen"`
 	ProcName        string        `json:"proc.name"`
 	ThreadID        int           `json:"thread.tid"`
-	ThreadVirtualID int           `json:"thread.vid"`
+	ThreadVirtualID int           `json:"thread.vtid"`
 	EventLatency    time.Duration `json:"evt.latency"`
 	RawRes          int           `json:"evt.rawres"`
 	SyscallType     string        `json:"syscall.type"`

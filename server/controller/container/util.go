@@ -31,7 +31,7 @@ type containerEvent struct {
 	virtualtid          int
 }
 
-func processLoop(ctx context.Context, c *model.Container, ch chan containerEvent) error {
+func processLoop(ctx context.Context, c *mutexContainer, ch chan containerEvent) error {
 	var e containerEvent
 	var err error
 	for {
@@ -45,23 +45,29 @@ func processLoop(ctx context.Context, c *model.Container, ch chan containerEvent
 		}
 		// container exits
 		if e.eventType == "procexit" && e.virtualtid == 1 {
+			log.L.WithField("container-id", c.ID).Debug("container exits")
 			return nil
 		}
 		if e.eventDir == "<" {
-			if err = handleSysCall(c, e); err != nil {
+			c.m.Lock()
+			if e.containerName != incompleteContainerName && c.Name == unknownContainerName {
+				c.Name = e.containerName
+			}
+			if err = handleSysCall(c.Container, e); err != nil {
 				log.L.WithError(err).WithField("container-id", c.ID).Error("syscall handler error")
 			}
 			if e.rawRes >= 0 && (e.isIORead || e.isIOWrite) {
-				if err = handleIO(c, e); err != nil {
+				if err = handleIO(c.Container, e); err != nil {
 					//if something wrong happens, just log it out
 					log.L.WithField("container-id", c.ID).WithError(err).Error("io handle error")
 				}
 			} else {
 				// may have some other handler?
-				if err = handleNetwork(c, e); err != nil {
+				if err = handleNetwork(c.Container, e); err != nil {
 					log.L.WithField("container-id", c.ID).WithError(err).Error("network handler error")
 				}
 			}
+			c.m.Unlock()
 		}
 	}
 }
@@ -161,7 +167,7 @@ func handleNetwork(c *model.Container, e containerEvent) error {
 		}
 		// should return nonexists error?
 		if _, exists := c.ActiveConnections[meta]; exists {
-			c.ActiveConnections[meta] = nil
+			delete(c.ActiveConnections, meta)
 		}
 	}
 	return nil

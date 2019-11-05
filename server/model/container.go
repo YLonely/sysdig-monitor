@@ -3,7 +3,7 @@ package model
 import "time"
 
 type Container struct {
-	ID   string
+	ID   string	
 	Name string
 
 	SystemCalls
@@ -40,19 +40,20 @@ type FileSystem struct {
 }
 
 type Network struct {
-	ActiveConnections          map[ConnectionMeta]*Connection
+	ActiveConnections          map[ConnectionMeta]*Connection `json:"-"`
+	FlattenConnections         []*FlattenConnection           `json:"active_connections"`
 	TotalReadIn, TotalWriteOut int64
 }
 
 type SystemCall struct {
-	Name string
+	Name string `json:"-"`
 	// total number of times it is invoked
 	Calls     int64
 	TotalTime time.Duration
 }
 
 type File struct {
-	Name     string
+	Name     string `json:"-"`
 	WriteOut int64
 	ReadIn   int64
 }
@@ -69,6 +70,11 @@ type ConnectionMeta struct {
 	DestIP     string
 	SourcePort int
 	DestPort   int
+}
+
+type FlattenConnection struct {
+	ConnectionMeta
+	Connection
 }
 
 type IOCall struct {
