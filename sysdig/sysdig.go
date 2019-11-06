@@ -3,23 +3,32 @@ package sysdig
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"errors"
 	"os/exec"
+	"strings"
 
 	"github.com/YLonely/sysdig-monitor/log"
 )
 
 const binaryName = "sysdig"
-const bufferSize = 10240
-const formatString = "*%evt.num %evt.outputtime %evt.cpu %thread.tid %thread.vtid %proc.name %evt.dir %evt.type %evt.info " +
+const bufferSize = 2048
+
+// well, cant find a better filter right now
+// use something others will draining the cpu
+const filter = "container.name!=host"
+
+var formatString = []string{
+	// common part
+	"*%evt.num %evt.outputtime %evt.cpu %thread.tid %thread.vtid %proc.name %evt.dir %evt.type %evt.info",
 	//syscall
-	"%syscall.type " +
+	"%syscall.type",
 	//container parts
-	"%container.name %container.id " +
+	"%container.name %container.id",
 	//file or network parts
-	"%fd.name %fd.type %evt.is_io_write %evt.is_io_read %evt.buffer %evt.buflen " +
+	"%fd.name %fd.type %evt.is_io_write %evt.is_io_read %evt.buffer %evt.buflen",
 	//performance
-	"%evt.latency"
+	"%evt.latency",
+}
 
 // Server starts sysdig and dispatch events
 type Server interface {
@@ -49,7 +58,7 @@ func (ls *localServer) Start(ctx context.Context) (error, chan error) {
 		log.L.WithError(err).Error("sysdig server pre check failed.")
 		return err, nil
 	}
-	cmd := exec.CommandContext(ctx, binaryName, "-p", formatString, "-j", "container.name!=host")
+	cmd := exec.CommandContext(ctx, binaryName, "-p", strings.Join(formatString, " "), "-j", filter)
 	rd, err := cmd.StdoutPipe()
 	if err != nil {
 		return err, nil
@@ -74,9 +83,7 @@ func (ls *localServer) Start(ctx context.Context) (error, chan error) {
 		for {
 			var e Event
 			if err := dec.Decode(&e); err != nil {
-				if err != io.EOF {
-					errCh <- err
-				}
+				errCh <- errors.New("sysdig server unexpectedly exit")
 				return
 			}
 			for _, subscriber := range ls.subscribers {

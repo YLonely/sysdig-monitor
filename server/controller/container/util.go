@@ -64,7 +64,7 @@ func processLoop(ctx context.Context, c *mutexContainer, ch chan containerEvent)
 			} else {
 				// may have some other handler?
 				if err = handleNetwork(c.Container, e); err != nil {
-					log.L.WithField("container-id", c.ID).WithError(err).Error("network handler error")
+					//log.L.WithField("container-id", c.ID).WithError(err).Error("network handler error")
 				}
 			}
 			c.m.Unlock()
@@ -134,8 +134,9 @@ func handleFileIO(c *model.Container, e containerEvent) error {
 		c.FileSystem.TotalReadIn += int64(bufLen)
 	}
 	latency := e.latency
+	latency /= time.Millisecond
 	if !strings.HasPrefix(e.fdName, "/dev/") {
-		iocall := &model.IOCall{FileName: fileName, Latency: latency}
+		iocall := &model.IOCall{FileName: fileName, Latency: e.latency}
 		if latency > latency100 {
 			c.IOCalls100 = append(c.IOCalls100, iocall)
 		}
@@ -196,10 +197,13 @@ func splitAddress(address string) (string, int, error) {
 		portStart, port int
 		err             error
 	)
-	if len(address) <= 0 {
+	if len(address) <= 1 {
 		return "", -1, errors.New("empty address")
 	}
-	for portStart := len(address) - 1; portStart >= 0 && address[portStart] != ':'; portStart-- {
+	for portStart = len(address) - 1; portStart >= 0 && address[portStart] != ':'; portStart-- {
+	}
+	if portStart <= 0 {
+		return "", -1, errors.New("no port address")
 	}
 	if port, err = strconv.Atoi(address[portStart+1:]); err != nil {
 		return "", -1, fmt.Errorf("wrong address format:%v", address)

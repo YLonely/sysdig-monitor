@@ -46,6 +46,7 @@ func (s *server) Start(ctx context.Context) chan error {
 		errch <- err
 		return errch
 	}
+	gin.SetMode(gin.ReleaseMode)
 	ginServer := gin.Default()
 	initRoutes(ginServer, containerContorller) // may be more controller?
 	s.httpServer = &http.Server{Addr: s.conf.Port, Handler: ginServer}
@@ -59,6 +60,7 @@ func (s *server) Start(ctx context.Context) chan error {
 		var e error
 		select {
 		case e = <-sysdigErrorCh:
+			errch <- e
 		case e = <-httpServerErrorCh:
 			errch <- e
 		}

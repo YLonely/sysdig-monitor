@@ -37,6 +37,7 @@ func main() {
 		signal.Notify(signals, handledSignals...)
 		log.L.Info("sysdig-monitor successfully booted")
 		<-done
+		log.L.Info("sysdig-monitor exits")
 		return nil
 	}
 	app.Run(os.Args)

@@ -36,7 +36,7 @@ func newMutexContainer(id, name string) *mutexContainer {
 	return &mutexContainer{Container: c}
 }
 
-const eventBufferLen = 1024
+const eventBufferLen = 512
 const unknownContainerName = "<unknown>"
 const incompleteContainerName = "incomplete"
 

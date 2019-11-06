@@ -11,5 +11,5 @@ var L = logrus.New()
 
 func init() {
 	L.SetOutput(os.Stdout)
-	L.SetLevel(logrus.DebugLevel)
+	L.SetLevel(logrus.InfoLevel)
 }
