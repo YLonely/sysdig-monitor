@@ -2,6 +2,8 @@ package model
 
 import "time"
 
+type Digest string
+
 type Container struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -15,9 +17,13 @@ type Container struct {
 
 func NewContainer(id, name string) *Container {
 	system := SystemCalls{IndividualCalls: map[string]*SystemCall{}}
-	fileSys := FileSystem{AccessedFiles: map[string]*File{}}
+	fileSys := FileSystem{AccessedLayers: map[Digest]*LayerInfo{}}
 	net := Network{ActiveConnections: map[ConnectionMeta]*Connection{}}
 	return &Container{ID: id, Name: name, SystemCalls: system, FileSystem: fileSys, Network: net}
+}
+
+func NewLayerInfo() *LayerInfo {
+	return &LayerInfo{AccessedFiles: map[string]*File{}}
 }
 
 type SystemCalls struct {
@@ -27,8 +33,8 @@ type SystemCalls struct {
 }
 
 type FileSystem struct {
-	// map file name to file
-	AccessedFiles map[string]*File `json:"accessed_files"`
+	// map layer digest to layer info
+	AccessedLayers map[Digest]*LayerInfo `json:"accessed_layers"`
 	// io calls whose latency is bigger than 1ms
 	IOCalls1 []*IOCall `json:"io_calls_more_than_1ms"`
 	// io calls whose latency is bigger than 10ms
@@ -50,6 +56,12 @@ type SystemCall struct {
 	// total number of times it is invoked
 	Calls     int64         `json:"calls"`
 	TotalTime time.Duration `json:"total_time"`
+}
+
+type LayerInfo struct {
+	AccessedFiles map[string]*File `json:"accessed_files"`
+	WriteOut      int64            `json:"write_out"`
+	ReadIn        int64            `json:"read_in"`
 }
 
 type File struct {

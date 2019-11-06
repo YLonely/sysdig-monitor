@@ -23,7 +23,7 @@ var formatString = []string{
 	//syscall
 	"%syscall.type",
 	//container parts
-	"%container.name %container.id",
+	"%container.name %container.id %container.image",
 	//file or network parts
 	"%fd.name %fd.type %evt.is_io_write %evt.is_io_read %evt.buffer %evt.buflen",
 	//performance
@@ -33,7 +33,7 @@ var formatString = []string{
 // Server starts sysdig and dispatch events
 type Server interface {
 	Subscribe() chan Event
-	Start(ctx context.Context) (error, chan error)
+	Start(ctx context.Context) (chan error, error)
 }
 
 var _ Server = &localServer{}
@@ -53,20 +53,20 @@ func (ls *localServer) Subscribe() chan Event {
 	return c
 }
 
-func (ls *localServer) Start(ctx context.Context) (error, chan error) {
+func (ls *localServer) Start(ctx context.Context) (chan error, error) {
 	if err := ls.preRrequestCheck(ctx); err != nil {
 		log.L.WithError(err).Error("sysdig server pre check failed.")
-		return err, nil
+		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, binaryName, "-p", strings.Join(formatString, " "), "-j", filter)
 	rd, err := cmd.StdoutPipe()
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 	ec, err := Monitor.Start(cmd)
 	if err != nil {
 		rd.Close()
-		return err, nil
+		return nil, err
 	}
 
 	var (
@@ -94,7 +94,7 @@ func (ls *localServer) Start(ctx context.Context) (error, chan error) {
 		}
 	}()
 
-	return nil, errCh
+	return errCh, nil
 }
 
 func (ls *localServer) preRrequestCheck(ctx context.Context) error {

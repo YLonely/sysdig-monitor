@@ -9,6 +9,9 @@ import (
 	"github.com/YLonely/sysdig-monitor/server/model"
 	"github.com/YLonely/sysdig-monitor/server/router"
 	"github.com/YLonely/sysdig-monitor/sysdig"
+	"github.com/docker/docker/client"
+    "github.com/docker/docker/api/types"
+
 )
 
 // Container represents a top level controller for container
@@ -18,35 +21,55 @@ type ContainerController struct {
 	ec chan sysdig.Event
 
 	// containers use container id as key
-	containers map[string]*mutexContainer
+	containers map[string]*container
 	// container process channels
 	containerCh map[string]chan containerEvent
 
 	//containers mutex
 	cm sync.RWMutex
+
+	//docker client
+	dockerCli *client.Client
 }
 
-type mutexContainer struct {
+type container struct {
+	imageConfig types.ImageInspect
 	m sync.RWMutex
 	*model.Container
 }
 
-func newMutexContainer(id, name string) *mutexContainer {
+func newContainer(id, name string) *container {
 	c := model.NewContainer(id, name)
-	return &mutexContainer{Container: c}
+	return &container{Container: c}
 }
 
 const eventBufferLen = 512
 const unknownContainerName = "<unknown>"
 const incompleteContainerName = "incomplete"
 
-func NewController(ctx context.Context, ec chan sysdig.Event) (controller.Controller, error) {
+func NewController(ctx context.Context, serverErrorChannel chan<- error) (controller.Controller, error) {
 	r := router.NewGroupRouter("/container")
-	res := &ContainerController{containerRouter: r, ec: ec, containers: map[string]*mutexContainer{}, containerCh: map[string]chan containerEvent{}}
-	res.initRouter()
-	if err := res.start(ctx); err != nil {
-		return res, err
+	sysdigServer := sysdig.NewServer()
+	res := &ContainerController{containerRouter: r, ec: sysdigServer.Subscribe(), containers: map[string]*container{}, containerCh: map[string]chan containerEvent{}}
+
+	cli, err := client.NewClientWithOpts(client.FromEnv)
+	if err != nil {
+		return nil, err
 	}
+	res.dockerCli = cli
+
+	if err := res.start(ctx); err != nil {
+		return nil, err
+	}
+	sysdigServC, err := sysdigServer.Start(ctx)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		e := <-sysdigServC
+		serverErrorChannel <- e
+	}()
+	res.initRouter()
 	return res, nil
 }
 
@@ -57,7 +80,6 @@ func (cc *ContainerController) BindedRoutes() []router.Route {
 }
 
 func (cc *ContainerController) initRouter() {
-	// TODO
 	cc.containerRouter.AddRoute("/", router.MethodGet, cc.getAllContainers)
 	cc.containerRouter.AddRoute("/:id", router.MethodGet, cc.getContainer)
 }
@@ -82,7 +104,7 @@ func (cc *ContainerController) start(ctx context.Context) error {
 			}
 			log.L.Debug(ce)
 			if _, exists := cc.containers[containerID]; !exists {
-				container := newMutexContainer(ce.containerID, containerName)
+				container := newcontainer(ce.containerID, containerName)
 				ch := make(chan containerEvent, eventBufferLen)
 				cc.cm.Lock()
 				cc.containers[containerID] = container
