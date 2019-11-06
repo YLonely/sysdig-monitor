@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/YLonely/sysdig-monitor/server/controller/container"
-	"github.com/YLonely/sysdig-monitor/sysdig"
 )
 
 // Config containes params to start a server, only port now
@@ -35,13 +34,7 @@ func NewServer(conf Config) Server {
 
 func (s *server) Start(ctx context.Context) chan error {
 	errch := make(chan error, 1)
-	sysdigServer := sysdig.NewServer()
-	containerContorller, err := container.NewController(ctx, sysdigServer.Subscribe())
-	if err != nil {
-		errch <- err
-		return errch
-	}
-	err, sysdigErrorCh := sysdigServer.Start(ctx)
+	containerContorller, err := container.NewController(ctx, errch)
 	if err != nil {
 		errch <- err
 		return errch
@@ -50,19 +43,9 @@ func (s *server) Start(ctx context.Context) chan error {
 	ginServer := gin.Default()
 	initRoutes(ginServer, containerContorller) // may be more controller?
 	s.httpServer = &http.Server{Addr: s.conf.Port, Handler: ginServer}
-	httpServerErrorCh := make(chan error, 1)
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			httpServerErrorCh <- err
-		}
-	}()
-	go func() {
-		var e error
-		select {
-		case e = <-sysdigErrorCh:
-			errch <- e
-		case e = <-httpServerErrorCh:
-			errch <- e
+			errch <- err
 		}
 	}()
 	return errch

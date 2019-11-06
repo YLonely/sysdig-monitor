@@ -6,6 +6,7 @@ import "time"
 type Event struct {
 	ContainerID     string        `json:"container.id"`
 	ContainerName   string        `json:"container.name"`
+	ContainerImage  string        `json:"container.image"`
 	EventCPU        int           `json:"evt.cpu"`
 	EventDir        string        `json:"evt.dir"`
 	EventInfo       string        `json:"evt.info"`

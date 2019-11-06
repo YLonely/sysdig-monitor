@@ -29,9 +29,10 @@ type containerEvent struct {
 	rawRes              int
 	syscallType         string
 	virtualtid          int
+	image               string
 }
 
-func processLoop(ctx context.Context, c *mutexContainer, ch chan containerEvent) error {
+func processLoop(ctx context.Context, c *container, ch chan containerEvent) error {
 	var e containerEvent
 	var err error
 	for {
