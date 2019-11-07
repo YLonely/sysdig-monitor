@@ -23,6 +23,7 @@ type FlattenConnection struct {
 type GetContainerResponse struct {
 	*model.Container
 	ActiveConnections []FlattenConnection `json:"active_connections"`
+	AccessedLayers    []*model.LayerInfo  `json:"accessed_layers"`
 }
 
 func (cc *ContainerController) getContainer(c *gin.Context) {
@@ -40,5 +41,10 @@ func (cc *ContainerController) getContainer(c *gin.Context) {
 	for meta, conn := range container.ActiveConnections {
 		flattenConns = append(flattenConns, FlattenConnection{Connection: *conn, ConnectionMeta: meta})
 	}
-	c.JSON(200, GetContainerResponse{Container: container.Container, ActiveConnections: flattenConns})
+	flattenLayersInfo := []*model.LayerInfo{}
+	for _, layer := range container.LayersInOrder {
+		flattenLayersInfo = append(flattenLayersInfo, container.AccessedLayers[layer])
+	}
+
+	c.JSON(200, GetContainerResponse{Container: container.Container, ActiveConnections: flattenConns, AccessedLayers: flattenLayersInfo})
 }

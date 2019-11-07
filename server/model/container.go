@@ -1,6 +1,11 @@
 package model
 
-import "time"
+import (
+	"fmt"
+	"errors"
+	"strings"
+	"time"
+)
 
 type Digest string
 
@@ -15,15 +20,44 @@ type Container struct {
 	Network
 }
 
-func NewContainer(id, name string) *Container {
+func NewContainer(id, name string, layerData map[string]string) (*Container, error) {
+	lowerLayers, exists := layerData["LowerDir"]
+	if !exists {
+		return nil, errors.New("cant find lowerdir in layerdata")
+	}
+	upperLayer, exists := layerData["UpperDir"]
+	if !exists {
+		return nil, errors.New("cant find upperdir in layerdata")
+	}
+	layers := strings.Split(lowerLayers, ":")
+	if len(layers) == 0 {
+		return nil, errors.New("no lowerlayers exists")
+	}
+	layers = append([]string{upperLayer}, layers...)
 	system := SystemCalls{IndividualCalls: map[string]*SystemCall{}}
-	fileSys := FileSystem{AccessedLayers: map[Digest]*LayerInfo{}}
+	fileSys := FileSystem{AccessedLayers: map[string]*LayerInfo{}, LayersInOrder: layers, AccessedFiles: map[string]*File{}}
+	for _, l := range layers {
+		fileSys.AccessedLayers[l] = NewLayerInfo(l)
+	}
+
 	net := Network{ActiveConnections: map[ConnectionMeta]*Connection{}}
-	return &Container{ID: id, Name: name, SystemCalls: system, FileSystem: fileSys, Network: net}
+	return &Container{ID: id, Name: name, SystemCalls: system, FileSystem: fileSys, Network: net}, nil
 }
 
-func NewLayerInfo() *LayerInfo {
-	return &LayerInfo{AccessedFiles: map[string]*File{}}
+func convertToDigest(layers []string) ([]Digest, error) {
+	digests := make([]Digest, 0, len(layers))
+	for _, layer := range layers {
+		dirs := strings.Split(layer, "/")
+		if len(dirs) < 2 {
+			return nil, fmt.Errorf("depth of the layer %v is less than 2", layer)
+		}
+		digests = append(digests, Digest(dirs[len(dirs)-2]))
+	}
+	return digests, nil
+}
+
+func NewLayerInfo(dir string) *LayerInfo {
+	return &LayerInfo{AccessedFiles: map[string]*File{}, Dir: dir}
 }
 
 type SystemCalls struct {
@@ -33,8 +67,12 @@ type SystemCalls struct {
 }
 
 type FileSystem struct {
-	// map layer digest to layer info
-	AccessedLayers map[Digest]*LayerInfo `json:"accessed_layers"`
+	// map file name to file
+	AccessedFiles map[string]*File `json:"-"`
+	// map layer path to layer info
+	AccessedLayers map[string]*LayerInfo `json:"-"`
+	// we have to record this to ensure the file search order
+	LayersInOrder []string `json:"-"`
 	// io calls whose latency is bigger than 1ms
 	IOCalls1 []*IOCall `json:"io_calls_more_than_1ms"`
 	// io calls whose latency is bigger than 10ms
@@ -59,15 +97,17 @@ type SystemCall struct {
 }
 
 type LayerInfo struct {
+	Dir           string           `json:"dir"`
 	AccessedFiles map[string]*File `json:"accessed_files"`
-	WriteOut      int64            `json:"write_out"`
-	ReadIn        int64            `json:"read_in"`
+	WriteOut      int64            `json:"layer_write_out"`
+	ReadIn        int64            `json:"layer_read_in"`
 }
 
 type File struct {
-	Name     string `json:"-"`
-	WriteOut int64  `json:"write_out"`
-	ReadIn   int64  `json:"read_in"`
+	Name     string     `json:"-"`
+	WriteOut int64      `json:"write_out"`
+	ReadIn   int64      `json:"read_in"`
+	Layer    *LayerInfo `json:"-"`
 }
 
 type Connection struct {

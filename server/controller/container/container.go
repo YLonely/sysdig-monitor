@@ -9,9 +9,8 @@ import (
 	"github.com/YLonely/sysdig-monitor/server/model"
 	"github.com/YLonely/sysdig-monitor/server/router"
 	"github.com/YLonely/sysdig-monitor/sysdig"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
-    "github.com/docker/docker/api/types"
-
 )
 
 // Container represents a top level controller for container
@@ -21,7 +20,7 @@ type ContainerController struct {
 	ec chan sysdig.Event
 
 	// containers use container id as key
-	containers map[string]*container
+	containers map[string]*mutexContainer
 	// container process channels
 	containerCh map[string]chan containerEvent
 
@@ -32,15 +31,17 @@ type ContainerController struct {
 	dockerCli *client.Client
 }
 
-type container struct {
-	imageConfig *types.ImageInspect
-	m           sync.RWMutex
+type mutexContainer struct {
+	m sync.RWMutex
 	*model.Container
 }
 
-func newContainer(id, name string, imageConfig *types.ImageInspect) *container {
-	c := model.NewContainer(id, name)
-	return &container{Container: c, imageConfig: imageConfig}
+func newMutexContainer(id, name string, containerJSON *types.ContainerJSON) (*mutexContainer, error) {
+	c, err := model.NewContainer(id, name, containerJSON.GraphDriver.Data)
+	if err != nil {
+		return nil, err
+	}
+	return &mutexContainer{Container: c}, nil
 }
 
 const eventBufferLen = 512
@@ -50,7 +51,7 @@ const incompleteContainerName = "incomplete"
 func NewController(ctx context.Context, serverErrorChannel chan<- error) (controller.Controller, error) {
 	r := router.NewGroupRouter("/container")
 	sysdigServer := sysdig.NewServer()
-	res := &ContainerController{containerRouter: r, ec: sysdigServer.Subscribe(), containers: map[string]*container{}, containerCh: map[string]chan containerEvent{}}
+	res := &ContainerController{containerRouter: r, ec: sysdigServer.Subscribe(), containers: map[string]*mutexContainer{}, containerCh: map[string]chan containerEvent{}}
 
 	cli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
@@ -104,12 +105,16 @@ func (cc *ContainerController) start(ctx context.Context) error {
 			}
 			log.L.Debug(ce)
 			if _, exists := cc.containers[containerID]; !exists {
-				config, err := cc.imageConfig(ctx, ce.image)
+				containerJSON, err := cc.containerJSON(ctx, containerID)
 				if err != nil {
-					log.L.WithError(err).WithField("container-id", containerID).Error("cant fetch image config")
+					log.L.WithError(err).WithField("container-id", containerID).Error("cant fetch container json")
 					continue
 				}
-				container := newContainer(ce.containerID, containerName, config)
+				container, err := newMutexContainer(ce.containerID, containerName, containerJSON)
+				if err != nil {
+					log.L.WithError(err).WithField("container-id", containerID).Error("")
+					continue
+				}
 				ch := make(chan containerEvent, eventBufferLen)
 				cc.cm.Lock()
 				cc.containers[containerID] = container
@@ -136,12 +141,12 @@ func (cc *ContainerController) start(ctx context.Context) error {
 	return nil
 }
 
-func (cc *ContainerController) imageConfig(ctx context.Context, id string) (*types.ImageInspect, error) {
-	imageConfig, _, err := cc.dockerCli.ImageInspectWithRaw(ctx, id)
+func (cc *ContainerController) containerJSON(ctx context.Context, id string) (*types.ContainerJSON, error) {
+	j, err := cc.dockerCli.ContainerInspect(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return &imageConfig, nil
+	return &j, nil
 }
 
 func convert(e sysdig.Event) containerEvent {
@@ -159,6 +164,5 @@ func convert(e sysdig.Event) containerEvent {
 	res.rawRes = e.RawRes
 	res.syscallType = e.SyscallType
 	res.virtualtid = e.ThreadVirtualID
-	res.image = e.ContainerImage
 	return res
 }

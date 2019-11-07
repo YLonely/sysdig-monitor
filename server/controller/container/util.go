@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/YLonely/sysdig-monitor/errdefs"
 	"github.com/YLonely/sysdig-monitor/log"
 	"github.com/YLonely/sysdig-monitor/server/model"
 )
@@ -29,10 +31,9 @@ type containerEvent struct {
 	rawRes              int
 	syscallType         string
 	virtualtid          int
-	image               string
 }
 
-func processLoop(ctx context.Context, c *container, ch chan containerEvent) error {
+func processLoop(ctx context.Context, c *mutexContainer, ch chan containerEvent) error {
 	var e containerEvent
 	var err error
 	for {
@@ -64,8 +65,8 @@ func processLoop(ctx context.Context, c *container, ch chan containerEvent) erro
 				}
 			} else {
 				// may have some other handler?
-				if err = handleNetwork(c.Container, e); err != nil {
-					//log.L.WithField("container-id", c.ID).WithError(err).Error("network handler error")
+				if err = handleNetwork(c.Container, e); err != nil && !errdefs.IsErrWrongFormat(err) {
+					log.L.WithField("container-id", c.ID).WithError(err).Warning("network handler error")
 				}
 			}
 			c.m.Unlock()
@@ -79,10 +80,14 @@ func handleSysCall(c *model.Container, e containerEvent) error {
 	if len(syscall) <= 0 {
 		return nil
 	}
-	if _, exists := c.IndividualCalls[syscall]; !exists {
-		c.IndividualCalls[syscall] = &model.SystemCall{Name: syscall}
+	var (
+		call   *model.SystemCall
+		exists bool
+	)
+	if call, exists = c.IndividualCalls[syscall]; !exists {
+		call = &model.SystemCall{Name: syscall}
+		c.IndividualCalls[syscall] = call
 	}
-	call := c.IndividualCalls[syscall]
 	call.Calls++
 	call.TotalTime += latency
 	c.SystemCalls.TotalCalls++
@@ -106,10 +111,14 @@ func handleNetIO(c *model.Container, e containerEvent) error {
 	}
 	// if event shows that a net io begins before "connect" or "accpet",
 	// we just ignore the error sequence and add a new connection
-	if _, exists := c.ActiveConnections[meta]; !exists {
-		c.ActiveConnections[meta] = &model.Connection{Type: e.fdType}
+	var (
+		conn   *model.Connection
+		exists bool
+	)
+	if conn, exists = c.ActiveConnections[meta]; !exists {
+		conn = &model.Connection{Type: e.fdType}
+		c.ActiveConnections[meta] = conn
 	}
-	conn := c.ActiveConnections[meta]
 	if e.isIORead {
 		conn.ReadIn += int64(bufLen)
 		c.Network.TotalReadIn += int64(bufLen)
@@ -123,14 +132,25 @@ func handleNetIO(c *model.Container, e containerEvent) error {
 func handleFileIO(c *model.Container, e containerEvent) error {
 	fileName := e.fdName
 	bufLen := e.bufferLen
-	if _, exists := c.AccessedFiles[fileName]; !exists {
-		c.AccessedFiles[fileName] = &model.File{Name: fileName}
+	var (
+		file   *model.File
+		exists bool
+	)
+
+	if file, exists = c.AccessedFiles[fileName]; !exists {
+		file = &model.File{Name: fileName}
+		err := attachToLayer(c, file)
+		if err != nil {
+			return nil
+		}
+		c.AccessedFiles[fileName] = file
 	}
-	file := c.AccessedFiles[fileName]
 	if e.isIOWrite {
 		file.WriteOut += int64(bufLen)
+		file.Layer.WriteOut += int64(bufLen)
 		c.FileSystem.TotalWriteOut += int64(bufLen)
 	} else if e.isIORead {
+		file.Layer.ReadIn += int64(bufLen)
 		file.ReadIn += int64(bufLen)
 		c.FileSystem.TotalReadIn += int64(bufLen)
 	}
@@ -179,7 +199,7 @@ func connectionMeta(fdname string) (model.ConnectionMeta, error) {
 	parts := strings.Split(fdname, "->")
 	meta := model.ConnectionMeta{}
 	if len(parts) != 2 {
-		return meta, fmt.Errorf("wrong connection meta format:%v", fdname)
+		return meta, errdefs.NewErrWrongFormat(fdname)
 	}
 	source, dest := parts[0], parts[1]
 
@@ -199,15 +219,27 @@ func splitAddress(address string) (string, int, error) {
 		err             error
 	)
 	if len(address) <= 1 {
-		return "", -1, errors.New("empty address")
+		return "", -1, errdefs.NewErrWrongFormat(address)
 	}
 	for portStart = len(address) - 1; portStart >= 0 && address[portStart] != ':'; portStart-- {
 	}
 	if portStart <= 0 {
-		return "", -1, errors.New("no port address")
+		return "", -1, errdefs.NewErrWrongFormat(address)
 	}
 	if port, err = strconv.Atoi(address[portStart+1:]); err != nil {
-		return "", -1, fmt.Errorf("wrong address format:%v", address)
+		return "", -1, errdefs.NewErrWrongFormat(address)
 	}
 	return address[:portStart], port, nil
+}
+
+func attachToLayer(c *model.Container, file *model.File) error {
+	fileName := file.Name
+	for _, dir := range c.LayersInOrder {
+		if _, err := os.Stat(dir + fileName); err == nil {
+			c.AccessedLayers[dir].AccessedFiles[fileName] = file
+			file.Layer = c.AccessedLayers[dir]
+			return nil
+		}
+	}
+	return fmt.Errorf("cant find file %v in any of lower layers", fileName)
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"io/ioutil"
 	"net/http"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/YLonely/sysdig-monitor/log"
 	"github.com/YLonely/sysdig-monitor/server/controller/container"
 )
 
@@ -40,6 +42,7 @@ func (s *server) Start(ctx context.Context) chan error {
 		return errch
 	}
 	gin.SetMode(gin.ReleaseMode)
+	gin.DefaultWriter = ioutil.Discard
 	ginServer := gin.Default()
 	initRoutes(ginServer, containerContorller) // may be more controller?
 	s.httpServer = &http.Server{Addr: s.conf.Port, Handler: ginServer}
@@ -48,6 +51,7 @@ func (s *server) Start(ctx context.Context) chan error {
 			errch <- err
 		}
 	}()
+	log.L.Info("web server start")
 	return errch
 }
 

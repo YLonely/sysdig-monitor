@@ -23,7 +23,7 @@ var formatString = []string{
 	//syscall
 	"%syscall.type",
 	//container parts
-	"%container.name %container.id %container.image",
+	"%container.name %container.id",
 	//file or network parts
 	"%fd.name %fd.type %evt.is_io_write %evt.is_io_read %evt.buffer %evt.buflen",
 	//performance
@@ -58,6 +58,7 @@ func (ls *localServer) Start(ctx context.Context) (chan error, error) {
 		log.L.WithError(err).Error("sysdig server pre check failed.")
 		return nil, err
 	}
+	log.L.Info("sysdig server pre-flight check successed")
 	cmd := exec.CommandContext(ctx, binaryName, "-p", strings.Join(formatString, " "), "-j", filter)
 	rd, err := cmd.StdoutPipe()
 	if err != nil {
@@ -93,7 +94,7 @@ func (ls *localServer) Start(ctx context.Context) (chan error, error) {
 			}
 		}
 	}()
-
+	log.L.Info("sysdig server start")
 	return errCh, nil
 }
 
