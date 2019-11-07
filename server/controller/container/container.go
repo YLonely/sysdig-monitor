@@ -33,14 +33,14 @@ type ContainerController struct {
 }
 
 type container struct {
-	imageConfig types.ImageInspect
-	m sync.RWMutex
+	imageConfig *types.ImageInspect
+	m           sync.RWMutex
 	*model.Container
 }
 
-func newContainer(id, name string) *container {
+func newContainer(id, name string, imageConfig *types.ImageInspect) *container {
 	c := model.NewContainer(id, name)
-	return &container{Container: c}
+	return &container{Container: c, imageConfig: imageConfig}
 }
 
 const eventBufferLen = 512
@@ -104,7 +104,12 @@ func (cc *ContainerController) start(ctx context.Context) error {
 			}
 			log.L.Debug(ce)
 			if _, exists := cc.containers[containerID]; !exists {
-				container := newcontainer(ce.containerID, containerName)
+				config, err := cc.imageConfig(ctx, ce.image)
+				if err != nil {
+					log.L.WithError(err).WithField("container-id", containerID).Error("cant fetch image config")
+					continue
+				}
+				container := newContainer(ce.containerID, containerName, config)
 				ch := make(chan containerEvent, eventBufferLen)
 				cc.cm.Lock()
 				cc.containers[containerID] = container
@@ -131,6 +136,14 @@ func (cc *ContainerController) start(ctx context.Context) error {
 	return nil
 }
 
+func (cc *ContainerController) imageConfig(ctx context.Context, id string) (*types.ImageInspect, error) {
+	imageConfig, _, err := cc.dockerCli.ImageInspectWithRaw(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &imageConfig, nil
+}
+
 func convert(e sysdig.Event) containerEvent {
 	res := containerEvent{}
 	res.containerID = e.ContainerID
@@ -146,5 +159,6 @@ func convert(e sysdig.Event) containerEvent {
 	res.rawRes = e.RawRes
 	res.syscallType = e.SyscallType
 	res.virtualtid = e.ThreadVirtualID
+	res.image = e.ContainerImage
 	return res
 }
