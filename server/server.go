@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/YLonely/sysdig-monitor/server/controller/prometheus"
+
 	"github.com/YLonely/sysdig-monitor/server/controller"
 
 	"github.com/gin-gonic/gin"
@@ -37,6 +39,7 @@ func NewServer(conf Config) Server {
 func (s *server) Start(ctx context.Context) chan error {
 	errch := make(chan error, 1)
 	containerContorller, err := container.NewController(ctx, errch)
+	promContorller := prometheus.NewController(ctx)
 	if err != nil {
 		errch <- err
 		return errch
@@ -44,7 +47,7 @@ func (s *server) Start(ctx context.Context) chan error {
 	gin.SetMode(gin.ReleaseMode)
 	gin.DefaultWriter = ioutil.Discard
 	ginServer := gin.Default()
-	initRoutes(ginServer, containerContorller) // may be more controller?
+	initRoutes(ginServer, containerContorller, promContorller) // may be more controller?
 	s.httpServer = &http.Server{Addr: s.conf.Port, Handler: ginServer}
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

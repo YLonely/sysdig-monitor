@@ -12,10 +12,10 @@ import (
 	"github.com/YLonely/sysdig-monitor/sysdig"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
+
 )
 
-// Container represents a top level controller for container
-type ContainerController struct {
+type containerController struct {
 	containerRouter router.Router
 	// event chan
 	ec chan sysdig.Event
@@ -54,7 +54,7 @@ const incompleteContainerName = "incomplete"
 func NewController(ctx context.Context, serverErrorChannel chan<- error) (controller.Controller, error) {
 	r := router.NewGroupRouter("/container")
 	sysdigServer := sysdig.NewServer()
-	res := &ContainerController{containerRouter: r, ec: sysdigServer.Subscribe(), containers: map[string]*mutexContainer{}, containerCh: map[string]chan containerEvent{}}
+	res := &containerController{containerRouter: r, ec: sysdigServer.Subscribe(), containers: map[string]*mutexContainer{}, containerCh: map[string]chan containerEvent{}}
 
 	cli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
@@ -77,18 +77,18 @@ func NewController(ctx context.Context, serverErrorChannel chan<- error) (contro
 	return res, nil
 }
 
-var _ controller.Controller = &ContainerController{}
+var _ controller.Controller = &containerController{}
 
-func (cc *ContainerController) BindedRoutes() []router.Route {
+func (cc *containerController) BindedRoutes() []router.Route {
 	return cc.containerRouter.Routes()
 }
 
-func (cc *ContainerController) initRouter() {
+func (cc *containerController) initRouter() {
 	cc.containerRouter.AddRoute("/", router.MethodGet, cc.getAllContainers)
 	cc.containerRouter.AddRoute("/:id", router.MethodGet, cc.getContainer)
 }
 
-func (cc *ContainerController) start(ctx context.Context) error {
+func (cc *containerController) start(ctx context.Context) error {
 	go func() {
 		var (
 			e      sysdig.Event
@@ -140,7 +140,7 @@ func (cc *ContainerController) start(ctx context.Context) error {
 	return nil
 }
 
-func (cc *ContainerController) containerJSON(ctx context.Context, id string) (*types.ContainerJSON, error) {
+func (cc *containerController) containerJSON(ctx context.Context, id string) (*types.ContainerJSON, error) {
 	j, err := cc.dockerCli.ContainerInspect(ctx, id)
 	if err != nil {
 		return nil, err
@@ -148,7 +148,7 @@ func (cc *ContainerController) containerJSON(ctx context.Context, id string) (*t
 	return &j, nil
 }
 
-func (cc *ContainerController) containerProcessLoop(ctx context.Context, container *mutexContainer, ch chan containerEvent) {
+func (cc *containerController) containerProcessLoop(ctx context.Context, container *mutexContainer, ch chan containerEvent) {
 	log.L.WithField("container-id", container.ID).Info("processLoop start")
 	err := processLoop(ctx, container, ch)
 	log.L.WithField("container-id", container.ID).Info("processLoop exits")
