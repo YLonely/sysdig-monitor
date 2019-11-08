@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/YLonely/sysdig-monitor/log"
 	"github.com/YLonely/sysdig-monitor/server/controller"
@@ -35,6 +36,8 @@ type mutexContainer struct {
 	m sync.RWMutex
 	*model.Container
 }
+
+const containerKeepingPeriod = time.Millisecond * 50
 
 func newMutexContainer(id, name string, containerJSON *types.ContainerJSON) (*mutexContainer, error) {
 	c, err := model.NewContainer(id, name, containerJSON.GraphDriver.Data)
@@ -87,7 +90,11 @@ func (cc *ContainerController) initRouter() {
 
 func (cc *ContainerController) start(ctx context.Context) error {
 	go func() {
-		var e sysdig.Event
+		var (
+			e      sysdig.Event
+			ch     chan containerEvent
+			exists bool
+		)
 		for {
 			select {
 			case e = <-cc.ec:
@@ -104,7 +111,13 @@ func (cc *ContainerController) start(ctx context.Context) error {
 				containerName = unknownContainerName
 			}
 			log.L.Debug(ce)
-			if _, exists := cc.containers[containerID]; !exists {
+			cc.cm.RLock()
+			ch, exists = cc.containerCh[containerID]
+			if exists {
+				ch <- ce
+			}
+			cc.cm.RUnlock()
+			if !exists {
 				containerJSON, err := cc.containerJSON(ctx, containerID)
 				if err != nil {
 					log.L.WithError(err).WithField("container-id", containerID).Error("cant fetch container json")
@@ -118,24 +131,10 @@ func (cc *ContainerController) start(ctx context.Context) error {
 				ch := make(chan containerEvent, eventBufferLen)
 				cc.cm.Lock()
 				cc.containers[containerID] = container
-				cc.cm.Unlock()
 				cc.containerCh[containerID] = ch
-				go func() {
-					log.L.WithField("container-id", containerID).Info("processLoop start")
-					err := processLoop(ctx, container, ch)
-					log.L.WithField("container-id", containerID).Info("processLoop exits")
-					if err != nil {
-						log.L.WithError(err).Error("")
-					}
-					cc.cm.Lock()
-					delete(cc.containers, container.ID)
-					cc.cm.Unlock()
-					delete(cc.containerCh, container.ID)
-					close(ch)
-				}()
+				cc.cm.Unlock()
+				go cc.containerProcessLoop(ctx, container, ch)
 			}
-			ch := cc.containerCh[containerID]
-			ch <- ce
 		}
 	}()
 	return nil
@@ -147,6 +146,23 @@ func (cc *ContainerController) containerJSON(ctx context.Context, id string) (*t
 		return nil, err
 	}
 	return &j, nil
+}
+
+func (cc *ContainerController) containerProcessLoop(ctx context.Context, container *mutexContainer, ch chan containerEvent) {
+	log.L.WithField("container-id", container.ID).Info("processLoop start")
+	err := processLoop(ctx, container, ch)
+	log.L.WithField("container-id", container.ID).Info("processLoop exits")
+	if err != nil {
+		log.L.WithError(err).Error("")
+	}
+	// In some cases, a few events will be catched after the exit of the container
+	// so wait a period of time before clean up to prevent the creation of processLoop of the same container
+	time.Sleep(containerKeepingPeriod)
+	cc.cm.Lock()
+	delete(cc.containers, container.ID)
+	delete(cc.containerCh, container.ID)
+	cc.cm.Unlock()
+	close(ch)
 }
 
 func convert(e sysdig.Event) containerEvent {

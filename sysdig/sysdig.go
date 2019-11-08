@@ -15,7 +15,7 @@ const bufferSize = 2048
 
 // well, cant find a better filter right now
 // use something others will draining the cpu
-const filter = "container.name!=host"
+const filter = "container.name!=host and (evt.dir=< or evt.type=procexit)"
 
 var formatString = []string{
 	// common part
