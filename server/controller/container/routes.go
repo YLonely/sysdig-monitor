@@ -5,7 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (cc *ContainerController) getAllContainers(c *gin.Context) {
+func (cc *containerController) getAllContainers(c *gin.Context) {
 	res := map[string]string{}
 	cc.cm.RLock()
 	for id, container := range cc.containers {
@@ -26,7 +26,7 @@ type GetContainerResponse struct {
 	AccessedLayers    []*model.LayerInfo  `json:"accessed_layers"`
 }
 
-func (cc *ContainerController) getContainer(c *gin.Context) {
+func (cc *containerController) getContainer(c *gin.Context) {
 	cid := c.Param("id")
 	cc.cm.RLock()
 	container, exists := cc.containers[cid]

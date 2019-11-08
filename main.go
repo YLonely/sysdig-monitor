@@ -17,6 +17,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "sysdig-monitor"
 	app.Usage = "Monitor using sysdig to trace all containers running on host."
+	app.Version = "v0.0.1"
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
