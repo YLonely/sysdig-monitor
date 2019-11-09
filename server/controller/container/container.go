@@ -12,7 +12,6 @@ import (
 	"github.com/YLonely/sysdig-monitor/sysdig"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
-
 )
 
 type containerController struct {

@@ -54,7 +54,7 @@ func (s *server) Start(ctx context.Context) chan error {
 			errch <- err
 		}
 	}()
-	log.L.Info("web server start")
+	log.L.Info("web server start. Listening on port " + s.conf.Port)
 	return errch
 }
 

@@ -36,6 +36,12 @@ type containerEvent struct {
 func processLoop(ctx context.Context, c *mutexContainer, ch chan containerEvent) error {
 	var e containerEvent
 	var err error
+	containerIDMetric.WithLabelValues(c.ID).Set(1)
+	depth := 1
+	for _, l := range c.LayersInOrder {
+		containerLayerDir.WithLabelValues(c.ID, l).Set(float64(depth))
+		depth++
+	}
 	for {
 		select {
 		case e = <-ch:
@@ -48,6 +54,7 @@ func processLoop(ctx context.Context, c *mutexContainer, ch chan containerEvent)
 		// container exits
 		if e.eventType == "procexit" && e.virtualtid == 1 {
 			log.L.WithField("container-id", c.ID).Debug("container exits")
+			cleanUpMetrics(c.Container)
 			return nil
 		}
 		if e.eventDir == "<" {
@@ -91,6 +98,8 @@ func handleSysCall(c *model.Container, e containerEvent) error {
 	call.Calls++
 	call.TotalTime += latency
 	c.SystemCalls.TotalCalls++
+	systemCallCount.WithLabelValues(c.ID, syscall).Set(float64(call.Calls))
+	systemCallTotalLatency.WithLabelValues(c.ID, syscall).Set(float64(call.TotalTime) / float64(time.Second))
 	return nil
 }
 
@@ -119,12 +128,15 @@ func handleNetIO(c *model.Container, e containerEvent) error {
 		conn = &model.Connection{Type: e.fdType}
 		c.ActiveConnections[meta] = conn
 	}
+	sip, sport, dip, dport := meta.SourceIP, strconv.Itoa(meta.SourcePort), meta.DestIP, strconv.Itoa(meta.DestPort)
 	if e.isIORead {
 		conn.ReadIn += int64(bufLen)
 		c.Network.TotalReadIn += int64(bufLen)
+		containerActiveConnectionRead.WithLabelValues(c.ID, sip, sport, dip, dport).Set(float64(conn.ReadIn))
 	} else if e.isIOWrite {
 		conn.WriteOut += int64(bufLen)
 		c.Network.TotalWriteOut += int64(bufLen)
+		containerActiveConnectionWrite.WithLabelValues(c.ID, sip, sport, dip, dport).Set(float64(conn.WriteOut))
 	}
 	return nil
 }
@@ -145,14 +157,17 @@ func handleFileIO(c *model.Container, e containerEvent) error {
 		}
 		c.AccessedFiles[fileName] = file
 	}
+	layerDir := file.Layer.Dir
 	if e.isIOWrite {
 		file.WriteOut += int64(bufLen)
 		file.Layer.WriteOut += int64(bufLen)
 		c.FileSystem.TotalWriteOut += int64(bufLen)
+		containerLayerFileWrite.WithLabelValues(c.ID, layerDir, fileName).Set(float64(file.WriteOut))
 	} else if e.isIORead {
 		file.Layer.ReadIn += int64(bufLen)
 		file.ReadIn += int64(bufLen)
 		c.FileSystem.TotalReadIn += int64(bufLen)
+		containerLayerFileRead.WithLabelValues(c.ID, layerDir, fileName).Set(float64(file.ReadIn))
 	}
 	latency := e.latency
 	latency /= time.Millisecond
@@ -188,8 +203,11 @@ func handleNetwork(c *model.Container, e containerEvent) error {
 			return err
 		}
 		// should return nonexists error?
+		sip, sport, dip, dport := meta.SourceIP, strconv.Itoa(meta.SourcePort), meta.DestIP, strconv.Itoa(meta.DestPort)
 		if _, exists := c.ActiveConnections[meta]; exists {
 			delete(c.ActiveConnections, meta)
+			containerActiveConnectionRead.DeleteLabelValues(c.ID, sip, sport, dip, dport)
+			containerActiveConnectionWrite.DeleteLabelValues(c.ID, sip, sport, dip, dport)
 		}
 	}
 	return nil
@@ -242,4 +260,31 @@ func attachToLayer(c *model.Container, file *model.File) error {
 		}
 	}
 	return fmt.Errorf("cant find file %v in any of lower layers", fileName)
+}
+
+func cleanUpMetrics(container *model.Container) {
+	// clean up connection metrics
+	for meta, _ := range container.ActiveConnections {
+		sip, sport, dip, dport := meta.SourceIP, strconv.Itoa(meta.SourcePort), meta.DestIP, strconv.Itoa(meta.DestPort)
+		containerActiveConnectionRead.DeleteLabelValues(container.ID, sip, sport, dip, dport)
+		containerActiveConnectionWrite.DeleteLabelValues(container.ID, sip, sport, dip, dport)
+	}
+
+	// clean up layer file metrics and layer metric
+	for layerDir, layerInfo := range container.AccessedLayers {
+		for fileName, _ := range layerInfo.AccessedFiles {
+			containerLayerFileRead.DeleteLabelValues(container.ID, layerDir, fileName)
+			containerLayerFileWrite.DeleteLabelValues(container.ID, layerDir, fileName)
+		}
+		containerLayerDir.DeleteLabelValues(container.ID, layerDir)
+	}
+
+	// clean up system call count and latency metrics
+	for syscall, _ := range container.IndividualCalls {
+		systemCallCount.DeleteLabelValues(container.ID, syscall)
+		systemCallTotalLatency.DeleteLabelValues(container.ID, syscall)
+	}
+
+	// delete this container
+	containerIDMetric.DeleteLabelValues(container.ID)
 }
