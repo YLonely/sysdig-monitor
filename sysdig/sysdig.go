@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/YLonely/sysdig-monitor/log"
 )
@@ -15,7 +16,7 @@ const bufferSize = 2048
 
 // well, cant find a better filter right now
 // use something others will draining the cpu
-const filter = "container.name!=host and (evt.dir=< or evt.type=procexit)"
+const filter = "container.name!=host"
 
 var formatString = []string{
 	// common part
@@ -33,18 +34,24 @@ var formatString = []string{
 // Server starts sysdig and dispatch events
 type Server interface {
 	Subscribe() chan Event
-	Start(ctx context.Context) (chan error, error)
+	Start() (chan error, error)
+	Shutdown() error
 }
 
 var _ Server = &localServer{}
 
 type localServer struct {
-	subscribers []*subscriber
+	subscribers  []*subscriber
+	ctx          context.Context
+	releaseMutex sync.Mutex
+	released     bool
+	releaseFunc  func()
+	sysdigCmd    *exec.Cmd
 }
 
 // NewServer creates a server
-func NewServer() Server {
-	return &localServer{}
+func NewServer(ctx context.Context) Server {
+	return &localServer{ctx: ctx}
 }
 
 func (ls *localServer) Subscribe() chan Event {
@@ -53,13 +60,13 @@ func (ls *localServer) Subscribe() chan Event {
 	return c
 }
 
-func (ls *localServer) Start(ctx context.Context) (chan error, error) {
-	if err := ls.preRrequestCheck(ctx); err != nil {
+func (ls *localServer) Start() (chan error, error) {
+	if err := ls.preRrequestCheck(ls.ctx); err != nil {
 		log.L.WithError(err).Error("sysdig server pre check failed.")
 		return nil, err
 	}
 	log.L.Info("sysdig server pre-flight check successed")
-	cmd := exec.CommandContext(ctx, binaryName, "-p", strings.Join(formatString, " "), "-j", filter)
+	cmd := exec.Command(binaryName, "-p", strings.Join(formatString, " "), "-j", filter)
 	rd, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -74,17 +81,25 @@ func (ls *localServer) Start(ctx context.Context) (chan error, error) {
 		dec   = json.NewDecoder(rd)
 		errCh = make(chan error, 1)
 	)
+	ls.sysdigCmd = cmd
+	ls.releaseFunc = func() {
+		Monitor.Wait(cmd, ec)
+		close(errCh)
+		rd.Close()
+	}
 
 	go func() {
-		defer func() {
-			close(errCh)
-			rd.Close()
-			Monitor.Wait(cmd, ec)
-		}()
 		for {
 			var e Event
 			if err := dec.Decode(&e); err != nil {
+				ls.releaseMutex.Lock()
+				defer ls.releaseMutex.Unlock()
+				if ls.released {
+					return
+				}
 				errCh <- errors.New("sysdig server unexpectedly exit")
+				ls.released = true
+				ls.releaseFunc()
 				return
 			}
 			for _, subscriber := range ls.subscribers {
@@ -96,6 +111,18 @@ func (ls *localServer) Start(ctx context.Context) (chan error, error) {
 	}()
 	log.L.Info("sysdig server start")
 	return errCh, nil
+}
+
+func (ls *localServer) Shutdown() error {
+	ls.releaseMutex.Lock()
+	defer ls.releaseMutex.Unlock()
+	if ls.released {
+		return nil
+	}
+	ls.sysdigCmd.Process.Kill()
+	ls.releaseFunc()
+	ls.released = true
+	return nil
 }
 
 func (ls *localServer) preRrequestCheck(ctx context.Context) error {

@@ -31,10 +31,10 @@ func main() {
 	app.Action = func(c *cli.Context) error {
 		conf := server.Config{Port: ":" + port}
 		signals := make(chan os.Signal, 2048)
-		ctx, cancel := context.WithCancel(context.Background())
-		serv := server.NewServer(conf)
-		errorC := serv.Start(ctx)
-		done := handleSignals(ctx, cancel, serv, signals, errorC)
+		ctx := context.Background()
+		serv := server.NewServer(ctx, conf)
+		errorC := serv.Start()
+		done := handleSignals(serv, signals, errorC)
 		signal.Notify(signals, handledSignals...)
 		log.L.Info("sysdig-monitor successfully booted")
 		<-done

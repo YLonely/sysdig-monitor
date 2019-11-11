@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"syscall"
 
@@ -15,7 +14,7 @@ var handledSignals = []os.Signal{
 	syscall.SIGINT,
 }
 
-func handleSignals(ctx context.Context, cancel context.CancelFunc, server server.Server, signals chan os.Signal, serverErrorC chan error) chan bool {
+func handleSignals(server server.Server, signals chan os.Signal, serverErrorC chan error) chan bool {
 	done := make(chan bool, 1)
 	go func() {
 		select {
@@ -25,8 +24,7 @@ func handleSignals(ctx context.Context, cancel context.CancelFunc, server server
 			log.L.WithError(err).Error("server error")
 		}
 		// ignore the shutdown error
-		server.Shutdown(ctx)
-		cancel()
+		server.Shutdown()
 		close(done)
 	}()
 	return done

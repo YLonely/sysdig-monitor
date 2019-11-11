@@ -23,31 +23,39 @@ type Config struct {
 
 // Server is the interface of a monitor server
 type Server interface {
-	Start(ctx context.Context) chan error
-	Shutdown(ctx context.Context) error
+	Start() chan error
+	Shutdown() error
 }
 
 type server struct {
-	conf       Config
-	httpServer *http.Server
+	conf        Config
+	httpServer  *http.Server
+	cancle      context.CancelFunc
+	ctx         context.Context
+	controllers []controller.Controller
 }
 
-func NewServer(conf Config) Server {
-	return &server{conf: conf}
+func NewServer(ctx context.Context, conf Config) Server {
+	res := &server{conf: conf}
+	ctx, cancle := context.WithCancel(ctx)
+	res.cancle = cancle
+	res.ctx = ctx
+	return res
 }
 
-func (s *server) Start(ctx context.Context) chan error {
+func (s *server) Start() chan error {
 	errch := make(chan error, 1)
-	containerContorller, err := container.NewController(ctx, errch)
-	promContorller := prometheus.NewController(ctx)
+	containerContorller, err := container.NewController(s.ctx, errch)
+	promContorller := prometheus.NewController(s.ctx)
 	if err != nil {
 		errch <- err
 		return errch
 	}
+	s.controllers = append(s.controllers, containerContorller, promContorller)
 	gin.SetMode(gin.ReleaseMode)
 	gin.DefaultWriter = ioutil.Discard
 	ginServer := gin.Default()
-	initRoutes(ginServer, containerContorller, promContorller) // may be more controller?
+	initRoutes(ginServer, s.controllers...) // may be more controller?
 	s.httpServer = &http.Server{Addr: s.conf.Port, Handler: ginServer}
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -58,10 +66,14 @@ func (s *server) Start(ctx context.Context) chan error {
 	return errch
 }
 
-func (s *server) Shutdown(ctx context.Context) error {
-	cctx, cancel := context.WithTimeout(ctx, time.Second*3)
+func (s *server) Shutdown() error {
+	ctx, cancel := context.WithTimeout(s.ctx, time.Second*3)
 	defer cancel()
-	err := s.httpServer.Shutdown(cctx)
+	err := s.httpServer.Shutdown(ctx)
+	s.cancle()
+	for _, c := range s.controllers {
+		c.Release()
+	}
 	return err
 }
 

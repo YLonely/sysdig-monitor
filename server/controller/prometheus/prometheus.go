@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 
-
 	"github.com/YLonely/sysdig-monitor/server/controller"
 	"github.com/YLonely/sysdig-monitor/server/router"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -23,6 +22,10 @@ func NewController(ctx context.Context) controller.Controller {
 
 func (pc *prometheusContorller) BindedRoutes() []router.Route {
 	return pc.router.Routes()
+}
+
+func (pc *prometheusContorller) Release() {
+
 }
 
 func (pc *prometheusContorller) initRouter() {

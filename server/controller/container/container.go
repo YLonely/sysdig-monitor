@@ -29,6 +29,8 @@ type containerController struct {
 
 	//docker client
 	dockerCli *client.Client
+
+	sysdigServer sysdig.Server
 }
 
 type mutexContainer struct {
@@ -52,7 +54,7 @@ const incompleteContainerName = "incomplete"
 
 func NewController(ctx context.Context, serverErrorChannel chan<- error) (controller.Controller, error) {
 	r := router.NewGroupRouter("/container")
-	sysdigServer := sysdig.NewServer()
+	sysdigServer := sysdig.NewServer(ctx)
 	res := &containerController{containerRouter: r, ec: sysdigServer.Subscribe(), containers: map[string]*mutexContainer{}, containerCh: map[string]chan containerEvent{}}
 
 	cli, err := client.NewClientWithOpts(client.FromEnv)
@@ -64,10 +66,11 @@ func NewController(ctx context.Context, serverErrorChannel chan<- error) (contro
 	if err := res.start(ctx); err != nil {
 		return nil, err
 	}
-	sysdigServC, err := sysdigServer.Start(ctx)
+	sysdigServC, err := sysdigServer.Start()
 	if err != nil {
 		return nil, err
 	}
+	res.sysdigServer = sysdigServer
 	go func() {
 		e := <-sysdigServC
 		serverErrorChannel <- e
@@ -80,6 +83,10 @@ var _ controller.Controller = &containerController{}
 
 func (cc *containerController) BindedRoutes() []router.Route {
 	return cc.containerRouter.Routes()
+}
+
+func (cc *containerController) Release() {
+	cc.sysdigServer.Shutdown()
 }
 
 func (cc *containerController) initRouter() {
