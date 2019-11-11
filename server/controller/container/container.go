@@ -52,7 +52,7 @@ const eventBufferLen = 512
 const unknownContainerName = "<unknown>"
 const incompleteContainerName = "incomplete"
 
-func NewController(ctx context.Context, serverErrorChannel chan<- error) (controller.Controller, error) {
+func NewController(ctx context.Context) (controller.Controller, error) {
 	r := router.NewGroupRouter("/container")
 	sysdigServer := sysdig.NewServer(ctx)
 	res := &containerController{containerRouter: r, ec: sysdigServer.Subscribe(), containers: map[string]*mutexContainer{}, containerCh: map[string]chan containerEvent{}}
@@ -73,7 +73,10 @@ func NewController(ctx context.Context, serverErrorChannel chan<- error) (contro
 	res.sysdigServer = sysdigServer
 	go func() {
 		e := <-sysdigServC
-		serverErrorChannel <- e
+		if e != nil {
+			// no matter what it is, just break it down
+			panic(e)
+		}
 	}()
 	res.initRouter()
 	return res, nil

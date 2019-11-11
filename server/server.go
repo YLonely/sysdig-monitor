@@ -45,13 +45,18 @@ func NewServer(ctx context.Context, conf Config) Server {
 
 func (s *server) Start() chan error {
 	errch := make(chan error, 1)
-	containerContorller, err := container.NewController(s.ctx, errch)
-	promContorller := prometheus.NewController(s.ctx)
+	//TODO: may be use plugin method to registry and manage all the controllers?
+	containerController, err := container.NewController(s.ctx)
 	if err != nil {
 		errch <- err
 		return errch
 	}
-	s.controllers = append(s.controllers, containerContorller, promContorller)
+	promController, err := prometheus.NewController(s.ctx)
+	if err != nil {
+		errch <- err
+		return errch
+	}
+	s.controllers = append(s.controllers, containerController, promController)
 	gin.SetMode(gin.ReleaseMode)
 	gin.DefaultWriter = ioutil.Discard
 	ginServer := gin.Default()

@@ -14,10 +14,10 @@ type prometheusContorller struct {
 	handler http.Handler
 }
 
-func NewController(ctx context.Context) controller.Controller {
+func NewController(ctx context.Context) (controller.Controller, error) {
 	res := &prometheusContorller{router: router.NewRouter(), handler: promhttp.Handler()}
 	res.initRouter()
-	return res
+	return res, nil
 }
 
 func (pc *prometheusContorller) BindedRoutes() []router.Route {
