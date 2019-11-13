@@ -15,8 +15,9 @@ const binaryName = "sysdig"
 const bufferSize = 2048
 
 // well, cant find a better filter right now
-// use something others will draining the cpu
-const filter = "container.name!=host"
+// use something others will draining the cpu or lost some necessary info
+// and at last, we don't want to monitor ourself
+const filter = "container.name!=host and container.image!=lwyan/sysdig-monitor"
 
 var formatString = []string{
 	// common part
