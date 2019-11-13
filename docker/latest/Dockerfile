@@ -7,7 +7,7 @@ LABEL RUN="docker run -i -t -v /var/run/docker.sock:/host/var/run/docker.sock -v
 ENV SYSDIG_HOST_ROOT /host
 
 ENV HOME /root
-ENV PORT=
+ENV PORT=8080
 ENV DOCKER_HOST=unix:///host/var/run/docker.sock
 
 RUN cp /etc/skel/.bashrc /root && cp /etc/skel/.profile /root
@@ -107,4 +107,4 @@ RUN chmod u+x /sysdig-monitor
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
-CMD ["./sysdig-monitor","${PORT}"]
+CMD ./sysdig-monitor --port ${PORT}

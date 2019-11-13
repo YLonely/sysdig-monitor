@@ -29,7 +29,7 @@ Pull the sysdig-monitor image:
 ```
 Run the sysdig-monitor
 ```
-    docker run -it --privileged -v /var/run/docker.sock:/host/var/run/docker.sock -v /dev:/host/dev -v /proc:/host/proc:ro -v /boot:/host/boot:ro -v /lib/modules:/host/lib/modules:ro -v /usr:/host/usr:ro -v /var/lib/docker:/var/lib/docker lwyan/sysdig-monitor
+    docker run -it --privileged -v /var/run/docker.sock:/host/var/run/docker.sock -v /dev:/host/dev -v /proc:/host/proc:ro -v /boot:/host/boot:ro -v /lib/modules:/host/lib/modules:ro -v /usr:/host/usr:ro -v /var/lib/docker:/var/lib/docker -e PORT=8080 lwyan/sysdig-monitor
 ```
 
 ## Usage
